@@ -1,0 +1,15 @@
+names:
+- altocumulus
+- cumulonimbus
+- cumulus
+- nimbostratus
+nc: 4
+roboflow:
+  license: CC BY 4.0
+  project: awan-analisis-cuaca
+  url: https://universe.roboflow.com/nirmalas-workspace/awan-analisis-cuaca/dataset/6
+  version: 6
+  workspace: nirmalas-workspace
+test: ../test/images
+train: ../train/images
+val: ../valid/images
