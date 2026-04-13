@@ -1,14 +1,18 @@
 **Perbandingan Model YOLOv8, SSD MobileNetV3, dan Faster R-CNN dalam Identifikasi Jenis Awan untuk Analisis Cuaca**
+
 Aplikasi dan penelitian ini digunakan untuk mendeteksi jenis awan (Altocumulus, Cumulonimbus, Cumulus, Nimbostratus) dari citra langit atau video, sekaligus memprediksi kondisi cuaca secara cerdas dengan menganalisis kombinasi jenis awan dan tingkat kecerahan (brightness) gambar.
 
 **Link Aplikasi / Demo**
+
 Anda dapat menjalankan notebook inferensi langsung melalui:
 🔗 [https://github.com/nur1020/Project-Deep-Learning-Nirmala]
 
 **Tim Pengembang / Peneliti**
+
 1. Nirmala
    
 **Deskripsi Proyek**
+
 Identifikasi jenis awan merupakan elemen krusial dalam meteorologi untuk memprediksi cuaca jangka pendek. Proyek ini bertujuan untuk:
 1. Mengidentifikasi 4 jenis awan utama penyusun cuaca: Altocumulus, Cumulonimbus, Cumulus, dan Nimbostratus.
 2. Membandingkan performa tiga arsitektur Object Detection mutakhir: YOLOv8, SSD MobileNetV3 Large, dan Faster R-CNN ResNet50 FPN.
@@ -37,6 +41,7 @@ Data Processing & Visualisasi
 - Pandas & NumPy — Manipulasi matriks dan analisis log hasil (CSV).
 
 **Struktur Proyek**
+
 awan-analisis-cuaca/
 │
 ├── dataset_baru/                # Dataset bersih setelah filtering (Train, Valid, Test)
@@ -50,6 +55,7 @@ awan-analisis-cuaca/
 └── identifikasi_awan_cuaca.ipynb # Notebook utama (Data prep, Training, Inference)
 
 **Metodologi**
+
 1. Data Wrangling & Assessing
 Data Gathering: Mengunduh dataset deteksi awan dari workspace Roboflow menggunakan API Key. Dataset berisi anomali cuaca dengan format anotasi YOLO (.txt).
 
@@ -92,6 +98,7 @@ Altocumulus ➡️ Mendung.
 Cumulus + Brightness > 130 ➡️ Cerah (Jika kecerahan < 130 ➡️ Berawan).
 
 **Evaluasi Model**
+
 Ketiga model dievaluasi secara komprehensif menggunakan set data pengujian (Test Dataset). Metrik yang digunakan meliputi:
 
 Mean Average Precision (mAP@50 dan mAP@50-95) menggunakan modul torchmetrics.
@@ -103,6 +110,7 @@ Precision & Recall batas atas (mar_100).
 (Catatan: Anda dapat menambahkan tabel hasil akhir perbandingan mAP dan kecepatan waktu inferensi dari ketiga model di bagian ini setelah mendapatkan angka pastinya dari Colab).
 
 **Penyimpanan Model**
+
 Model yang telah dilatih (best weights) disimpan ke dalam Google Drive agar dapat dipanggil kembali tanpa perlu melatih ulang:
 
 - Model_YOLO_AWAN_best.pt
@@ -112,6 +120,7 @@ Model yang telah dilatih (best weights) disimpan ke dalam Google Drive agar dapa
 - Model_FasterRCNN_AWAN_best.pth
 
 **Dependencies**
+
 torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.0.0
@@ -124,4 +133,5 @@ seaborn>=0.12.0
 PyYAML>=6.0
 
 **Lisensi**
+
 Proyek ini dibuat untuk keperluan akademis dan penelitian.
