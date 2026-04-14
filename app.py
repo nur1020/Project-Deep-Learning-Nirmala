@@ -205,10 +205,7 @@ with st.sidebar:
         help="YOLO = tercepat, Faster R-CNN = paling akurat"
     )
 
-    conf_threshold = st.slider(
-        "🎯 Confidence Threshold", 0.1, 0.95, 0.40, 0.05,
-        help="Semakin tinggi = lebih selektif"
-    )
+    conf_threshold = 0.25
 
     st.divider()
     st.markdown("**Kelas Awan yang Didukung:**")
