@@ -239,73 +239,26 @@ tab_cam, tab_img, tab_vid = st.tabs(["📷 Kamera Live", "🖼️ Upload Gambar"
 # ══════════════════════════════════════════════
 with tab_cam:
     st.markdown("### 📷 Deteksi Langsung via Kamera")
-    st.info("Arahkan kamera HP/laptop ke langit, lalu tekan **Mulai Kamera**.")
+    st.info("Arahkan kamera HP ke langit, lalu ambil foto.")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        run_camera = st.toggle("🎥 Mulai Kamera", value=False)
-    with col_b:
-        flip       = st.toggle("🔄 Flip Kamera", value=False)
+    img_captured = st.camera_input("📸 Ambil Foto Langit")
 
-    FRAME_WINDOW = st.empty()
-    result_area  = st.empty()
+    if img_captured is not None:
+        img_pil = Image.open(img_captured).convert("RGB")
+        img_bgr = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
-    if run_camera:
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        with st.spinner("🔍 Mendeteksi..."):
+            dets = predict_image(model_tuple, img_bgr, conf_threshold)
 
-        if not cap.isOpened():
-            st.error("❌ Kamera tidak ditemukan. Pastikan kamera terhubung.")
-        else:
-            frame_count = 0
-            last_dets   = []
+        annotated = draw_results(img_bgr, dets)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(img_pil, caption="Foto Asli", use_container_width=True)
+        with col2:
+            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+                     caption="Hasil Deteksi", use_container_width=True)
 
-            while run_camera:
-                ret, frame = cap.read()
-                if not ret:
-                    st.warning("Frame kosong – mencoba ulang...")
-                    time.sleep(0.1)
-                    continue
-
-                if flip:
-                    frame = cv2.flip(frame, 1)
-
-                # Prediksi setiap 5 frame (hemat CPU)
-                if frame_count % 5 == 0:
-                    last_dets = predict_image(model_tuple, frame, conf_threshold)
-
-                annotated = draw_results(frame, last_dets)
-                rgb_frame  = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                FRAME_WINDOW.image(rgb_frame, channels="RGB", use_container_width=True)
-
-                # Update info box
-                if last_dets:
-                    top = last_dets[0]
-                    info = CLOUD_WEATHER_MAP.get(top["label"],
-                                                  {"icon": "❓", "cuaca": "-"})
-                    result_area.success(
-                        f"{info['icon']} **{top['label']}** — "
-                        f"Cuaca: **{info['cuaca']}** "
-                        f"({top['conf']:.0%})"
-                    )
-                else:
-                    result_area.info("Menunggu deteksi awan...")
-
-                frame_count += 1
-                time.sleep(0.03)   # ~30 fps max
-
-            cap.release()
-            FRAME_WINDOW.empty()
-            result_area.empty()
-    else:
-        FRAME_WINDOW.markdown(
-            "<div style='height:300px;display:flex;align-items:center;"
-            "justify-content:center;background:#f0f2f6;border-radius:12px;"
-            "font-size:48px'>📷</div>",
-            unsafe_allow_html=True
-        )
-
+        show_detection_cards(dets)
 
 # ══════════════════════════════════════════════
 # TAB 2 – UPLOAD GAMBAR
