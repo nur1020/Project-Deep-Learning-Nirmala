@@ -1,13 +1,11 @@
 import streamlit as st
 import os
 import gdown
-import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import tempfile
 import time
-from pathlib import Path
-import sys
+import threading
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -19,35 +17,35 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Kelas awan + cuaca yang diprediksi
 CLOUD_WEATHER_MAP = {
-    "Altocumulus":  {"cuaca": "Berawan Sedang",           "icon": "⛅",   "warna": "#6495ED"},
-    "Nimbostratus": {"cuaca": "Hujan Lebat",              "icon": "🌧️",  "warna": "#2F4F4F"},
-    "Cumulus":      {"cuaca": "Cerah",                    "icon": "⛅",   "warna": "#32CD32"},
-    "Cumulonimbus": {"cuaca": "Badai / Hujan Deras",     "icon": "⛈️",   "warna": "#DC143C"},
+    "Altocumulus":  {"cuaca": "Berawan Sedang",      "icon": "⛅",  "warna": "#6495ED"},
+    "Nimbostratus": {"cuaca": "Hujan Lebat",         "icon": "🌧️", "warna": "#2F4F4F"},
+    "Cumulus":      {"cuaca": "Cerah",               "icon": "⛅",  "warna": "#32CD32"},
+    "Cumulonimbus": {"cuaca": "Badai / Hujan Deras", "icon": "⛈️", "warna": "#DC143C"},
 }
 
+# ─────────────────────────────────────────────
+# DOWNLOAD MODEL
+# ─────────────────────────────────────────────
 def download_models():
     os.makedirs("models", exist_ok=True)
-    
     files = {
         "models/Model_FasterRCNN_AWAN_best.pth": "1B7JoXIF5KUOEbRvZqzGkpvStyjGk-RXJ",
         "models/Model_SSD_AWAN_best.pth":         "1ojMR1qJhhMkSKI_3ELG9vyHay2ERNn5E",
         "models/Model_YOLO_AWAN_best.pt":         "1MfZyBQzqlsBbbcGlfeG78ItSdH5n5oJU",
     }
-    
     for path, file_id in files.items():
         if not os.path.exists(path):
             with st.spinner(f"⬇️ Mendownload {path}..."):
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", path, quiet=False)
 
 download_models()
+
 # ─────────────────────────────────────────────
-# LOAD MODEL (cached)
+# LOAD MODEL
 # ─────────────────────────────────────────────
 @st.cache_resource
 def load_model(model_name):
-    """Load model sesuai pilihan. Returnvalue: model object."""
     try:
         if model_name == "YOLO":
             from ultralytics import YOLO
@@ -56,13 +54,10 @@ def load_model(model_name):
 
         elif model_name == "SSD":
             import torch
-            import torchvision
             from torchvision.models.detection import ssd300_vgg16
-            num_classes = 5   # +1 background
             model = ssd300_vgg16(weights=None)
-            # Sesuaikan head jika perlu
             checkpoint = torch.load("models/Model_SSD_AWAN_best.pth",
-                                    map_location=torch.device("cpu"))
+                                    map_location="cpu")
             state = checkpoint.get("model_state_dict", checkpoint)
             model.load_state_dict(state, strict=False)
             model.eval()
@@ -71,10 +66,9 @@ def load_model(model_name):
         elif model_name == "Faster R-CNN":
             import torch
             from torchvision.models.detection import fasterrcnn_resnet50_fpn
-            num_classes = 5 # 4 kelas + background
-            model = fasterrcnn_resnet50_fpn(weights=None, num_classes=num_classes)
+            model = fasterrcnn_resnet50_fpn(weights=None, num_classes=5)
             checkpoint = torch.load("models/Model_FasterRCNN_AWAN_best.pth",
-                                    map_location=torch.device("cpu"))
+                                    map_location="cpu")
             state = checkpoint.get("model_state_dict", checkpoint)
             model.load_state_dict(state, strict=False)
             model.eval()
@@ -86,13 +80,15 @@ def load_model(model_name):
 
 
 # ─────────────────────────────────────────────
-# INFERENCE
+# INFERENCE (tanpa cv2)
 # ─────────────────────────────────────────────
-def predict_image(model_tuple, img_bgr, conf_threshold=0.4):
-    """
-    Jalankan inferensi. Return list of dicts:
-    [{"label": str, "conf": float, "box": [x1,y1,x2,y2]}, ...]
-    """
+def pil_to_tensor(img_pil):
+    import torch
+    arr = np.array(img_pil.convert("RGB")).astype(np.float32) / 255.0
+    tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)
+    return tensor
+
+def predict_pil(model_tuple, img_pil, conf_threshold=0.25):
     if model_tuple is None:
         return []
 
@@ -101,7 +97,8 @@ def predict_image(model_tuple, img_bgr, conf_threshold=0.4):
 
     try:
         if model_type == "yolo":
-            res = model.predict(img_bgr, conf=conf_threshold, verbose=False)
+            img_np = np.array(img_pil.convert("RGB"))
+            res = model.predict(img_np, conf=conf_threshold, verbose=False)
             for r in res:
                 for box in r.boxes:
                     cls_id = int(box.cls[0])
@@ -113,11 +110,7 @@ def predict_image(model_tuple, img_bgr, conf_threshold=0.4):
 
         elif model_type in ("ssd", "fasterrcnn"):
             import torch
-            import torchvision.transforms.functional as F
-
-            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-            tensor  = F.to_tensor(img_rgb).unsqueeze(0)
-
+            tensor = pil_to_tensor(img_pil)
             with torch.no_grad():
                 preds = model(tensor)[0]
 
@@ -128,36 +121,64 @@ def predict_image(model_tuple, img_bgr, conf_threshold=0.4):
 
             for box, lbl, score in zip(boxes, labels, scores):
                 if score >= conf_threshold:
-                    idx   = int(lbl) - 1  # 0 = background
-                    name  = class_names[idx] if 0 <= idx < len(class_names) else f"Class {lbl}"
+                    idx  = int(lbl) - 1
+                    name = class_names[idx] if 0 <= idx < len(class_names) else f"Class {lbl}"
                     x1, y1, x2, y2 = map(int, box.tolist())
                     results.append({"label": name, "conf": float(score),
                                     "box": [x1, y1, x2, y2]})
     except Exception as e:
-        st.warning(f"⚠️ Error saat prediksi: {e}")
+        st.warning(f"⚠️ Error prediksi: {e}")
 
     return results
 
 
-def draw_results(img_bgr, detections):
-    """Gambar bounding box + label ke gambar."""
-    img = img_bgr.copy()
+# ─────────────────────────────────────────────
+# DRAW (pakai Pillow, tanpa cv2)
+# ─────────────────────────────────────────────
+def draw_results_pil(img_pil, detections):
+    img  = img_pil.convert("RGB").copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+
+    try:
+        font       = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+    except Exception:
+        font       = ImageFont.load_default()
+        font_small = font
+
     for det in detections:
         label = det["label"]
         conf  = det["conf"]
         x1, y1, x2, y2 = det["box"]
-        info  = CLOUD_WEATHER_MAP.get(label, {"cuaca": "Unknown", "icon": "❓"})
+        info  = CLOUD_WEATHER_MAP.get(label, {"cuaca": "Unknown"})
+        cuaca = info["cuaca"]
 
-        # Warna kotak (BGR)
-        color = (0, 200, 100)
+        # Bounding box hijau
+        draw.rectangle([x1, y1, x2, y2], outline=(0, 200, 100), width=3)
 
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+        # Label atas
+        text1 = f"{label} {conf:.0%}"
+        bbox1 = draw.textbbox((0, 0), text1, font=font)
+        tw1, th1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
+        draw.rectangle([x1, y1 - th1 - 6, x1 + tw1 + 6, y1], fill=(0, 200, 100))
+        draw.text((x1 + 3, y1 - th1 - 3), text1, fill=(255, 255, 255), font=font)
 
-        text = f"{label} {conf:.0%}"
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        cv2.rectangle(img, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(img, text, (x1 + 2, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Label cuaca bawah
+        text2 = f"Cuaca: {cuaca}"
+        bbox2 = draw.textbbox((0, 0), text2, font=font_small)
+        tw2, th2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
+        draw.rectangle([x1, y2, x1 + tw2 + 6, y2 + th2 + 6], fill=(30, 30, 30))
+        draw.text((x1 + 3, y2 + 3), text2, fill=(0, 255, 255), font=font_small)
+
+    # Banner cuaca utama di atas
+    if detections:
+        top        = detections[0]
+        info       = CLOUD_WEATHER_MAP.get(top["label"], {"cuaca": "-"})
+        cuaca_text = f"Cuaca: {info['cuaca']}"
+        draw.rectangle([0, 0, w, 36], fill=(0, 0, 0))
+        draw.text((10, 8), cuaca_text, fill=(0, 255, 255), font=font)
+
     return img
 
 
@@ -166,14 +187,14 @@ def draw_results(img_bgr, detections):
 # ─────────────────────────────────────────────
 def show_detection_cards(detections):
     if not detections:
-        st.info("Tidak ada awan terdeteksi. Coba turunkan threshold atau arahkan kamera ke langit.")
+        st.info("Tidak ada awan terdeteksi. Coba arahkan kamera ke langit.")
         return
 
     st.markdown("### 🔍 Hasil Deteksi")
     for det in detections:
         label = det["label"]
         conf  = det["conf"]
-        info  = CLOUD_WEATHER_MAP.get(label, {"cuaca": "-", "icon": "❓", "warna": "#888"})
+        info  = CLOUD_WEATHER_MAP.get(label, {"cuaca": "-", "icon": "❓"})
 
         with st.container():
             col1, col2 = st.columns([1, 4])
@@ -205,10 +226,7 @@ with st.sidebar:
         help="YOLO = tercepat, Faster R-CNN = paling akurat"
     )
 
-    conf_threshold = st.slider(
-        "🎯 Confidence Threshold", 0.1, 0.95, 0.40, 0.05,
-        help="Semakin tinggi = lebih selektif"
-    )
+    conf_threshold = 0.25
 
     st.divider()
     st.markdown("**Kelas Awan yang Didukung:**")
@@ -223,7 +241,7 @@ with st.spinner(f"⏳ Loading model {model_choice}..."):
     model_tuple = load_model(model_choice)
 
 if model_tuple is None:
-    st.error("Model gagal dimuat. Pastikan file model ada di folder `models/`.")
+    st.error("Model gagal dimuat.")
     st.stop()
 
 st.success(f"✅ Model **{model_choice}** siap digunakan!")
@@ -238,73 +256,62 @@ tab_cam, tab_img, tab_vid = st.tabs(["📷 Kamera Live", "🖼️ Upload Gambar"
 # TAB 1 – KAMERA LIVE
 # ══════════════════════════════════════════════
 with tab_cam:
-    st.markdown("### 📷 Deteksi Langsung via Kamera")
-    st.info("Arahkan kamera HP/laptop ke langit, lalu tekan **Mulai Kamera**.")
+    st.markdown("### 📷 Deteksi Realtime via Kamera")
+    st.info("Arahkan kamera HP ke langit — deteksi berjalan otomatis!")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        run_camera = st.toggle("🎥 Mulai Kamera", value=False)
-    with col_b:
-        flip       = st.toggle("🔄 Flip Kamera", value=False)
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+    import av
 
-    FRAME_WINDOW = st.empty()
-    result_area  = st.empty()
+    class CloudDetector(VideoProcessorBase):
+        def __init__(self):
+            self.conf_threshold = conf_threshold
+            self.model_tuple    = model_tuple
+            self.last_dets      = []
+            self.lock           = threading.Lock()
 
-    if run_camera:
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        def recv(self, frame):
+            img_np  = frame.to_ndarray(format="rgb24")
+            img_pil = Image.fromarray(img_np)
+            dets    = predict_pil(self.model_tuple, img_pil, self.conf_threshold)
+            with self.lock:
+                self.last_dets = dets
+            annotated = draw_results_pil(img_pil, dets)
+            return av.VideoFrame.from_ndarray(np.array(annotated), format="rgb24")
 
-        if not cap.isOpened():
-            st.error("❌ Kamera tidak ditemukan. Pastikan kamera terhubung.")
-        else:
-            frame_count = 0
-            last_dets   = []
+    ctx = webrtc_streamer(
+        key="cloud-detector",
+        video_processor_factory=CloudDetector,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
 
-            while run_camera:
-                ret, frame = cap.read()
-                if not ret:
-                    st.warning("Frame kosong – mencoba ulang...")
-                    time.sleep(0.1)
-                    continue
+    st.markdown("---")
+    st.markdown("### 🔍 Hasil Deteksi Realtime")
+    result_placeholder = st.empty()
 
-                if flip:
-                    frame = cv2.flip(frame, 1)
+    if ctx.video_processor:
+        while True:
+            with ctx.video_processor.lock:
+                dets = ctx.video_processor.last_dets
 
-                # Prediksi setiap 5 frame (hemat CPU)
-                if frame_count % 5 == 0:
-                    last_dets = predict_image(model_tuple, frame, conf_threshold)
+            if dets:
+                result_text = ""
+                for det in dets:
+                    label = det["label"]
+                    conf  = det["conf"]
+                    info  = CLOUD_WEATHER_MAP.get(label, {"icon": "❓", "cuaca": "-"})
+                    result_text += f"""
+<div style='background:#1e1e2e;padding:16px;border-radius:12px;
+margin-bottom:10px;border-left:4px solid #00cc88'>
+<h3 style='color:white;margin:0'>{info['icon']} {label}</h3>
+<p style='color:#aaa;margin:4px 0'>☁️ Cuaca: <b style='color:white'>{info['cuaca']}</b></p>
+<p style='color:#aaa;margin:4px 0'>🎯 Kepercayaan: <b style='color:#00cc88'>{conf:.0%}</b></p>
+</div>"""
+                result_placeholder.markdown(result_text, unsafe_allow_html=True)
+            else:
+                result_placeholder.info("⏳ Menunggu deteksi awan... Arahkan kamera ke langit!")
 
-                annotated = draw_results(frame, last_dets)
-                rgb_frame  = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                FRAME_WINDOW.image(rgb_frame, channels="RGB", use_container_width=True)
-
-                # Update info box
-                if last_dets:
-                    top = last_dets[0]
-                    info = CLOUD_WEATHER_MAP.get(top["label"],
-                                                  {"icon": "❓", "cuaca": "-"})
-                    result_area.success(
-                        f"{info['icon']} **{top['label']}** — "
-                        f"Cuaca: **{info['cuaca']}** "
-                        f"({top['conf']:.0%})"
-                    )
-                else:
-                    result_area.info("Menunggu deteksi awan...")
-
-                frame_count += 1
-                time.sleep(0.03)   # ~30 fps max
-
-            cap.release()
-            FRAME_WINDOW.empty()
-            result_area.empty()
-    else:
-        FRAME_WINDOW.markdown(
-            "<div style='height:300px;display:flex;align-items:center;"
-            "justify-content:center;background:#f0f2f6;border-radius:12px;"
-            "font-size:48px'>📷</div>",
-            unsafe_allow_html=True
-        )
+            time.sleep(0.5)
 
 
 # ══════════════════════════════════════════════
@@ -322,18 +329,16 @@ with tab_img:
         for up_img in uploaded_imgs:
             st.markdown(f"---\n#### 📁 {up_img.name}")
             img_pil = Image.open(up_img).convert("RGB")
-            img_bgr = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
             with st.spinner("🔍 Mendeteksi..."):
-                dets = predict_image(model_tuple, img_bgr, conf_threshold)
+                dets = predict_pil(model_tuple, img_pil, conf_threshold)
 
-            annotated = draw_results(img_bgr, dets)
+            annotated = draw_results_pil(img_pil, dets)
             col1, col2 = st.columns(2)
             with col1:
                 st.image(img_pil, caption="Gambar Asli", use_container_width=True)
             with col2:
-                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-                         caption="Hasil Deteksi", use_container_width=True)
+                st.image(annotated, caption="Hasil Deteksi", use_container_width=True)
 
             show_detection_cards(dets)
     else:
@@ -356,7 +361,6 @@ with tab_vid:
     )
 
     if uploaded_vid:
-        # Simpan ke file temp
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         tfile.write(uploaded_vid.read())
         tfile.close()
@@ -364,10 +368,12 @@ with tab_vid:
         st.video(tfile.name)
 
         if st.button("▶️ Mulai Analisis Video"):
-            cap = cv2.VideoCapture(tfile.name)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps          = cap.get(cv2.CAP_PROP_FPS) or 25
-            process_every = max(1, int(fps // 2))  # Proses 2 frame/detik
+            import av as av_lib
+            container    = av_lib.open(tfile.name)
+            stream       = container.streams.video[0]
+            total_frames = stream.frames or 0
+            fps          = float(stream.average_rate) if stream.average_rate else 25
+            process_every = max(1, int(fps // 2))
 
             st.markdown(f"**Total frame:** {total_frames} | **FPS:** {fps:.1f}")
 
@@ -375,44 +381,40 @@ with tab_vid:
             vid_window   = st.empty()
             info_window  = st.empty()
 
-            all_dets     = []
-            frame_idx    = 0
-            last_dets    = []
+            all_dets  = []
+            frame_idx = 0
+            last_dets = []
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            for packet in container.demux(stream):
+                for frame in packet.decode():
+                    img_pil = frame.to_image()
 
-                if frame_idx % process_every == 0:
-                    last_dets = predict_image(model_tuple, frame, conf_threshold)
-                    all_dets.extend(last_dets)
+                    if frame_idx % process_every == 0:
+                        last_dets = predict_pil(model_tuple, img_pil, conf_threshold)
+                        all_dets.extend(last_dets)
 
-                annotated = draw_results(frame, last_dets)
-                rgb        = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                vid_window.image(rgb, channels="RGB", use_container_width=True)
+                    annotated = draw_results_pil(img_pil, last_dets)
+                    vid_window.image(annotated, use_container_width=True)
 
-                if total_frames > 0:
-                    progress_bar.progress(min(frame_idx / total_frames, 1.0))
+                    if total_frames > 0:
+                        progress_bar.progress(min(frame_idx / total_frames, 1.0))
 
-                if last_dets:
-                    top  = last_dets[0]
-                    info = CLOUD_WEATHER_MAP.get(top["label"],
-                                                  {"icon": "❓", "cuaca": "-"})
-                    info_window.info(
-                        f"{info['icon']} Frame {frame_idx}: "
-                        f"**{top['label']}** — {info['cuaca']} "
-                        f"({top['conf']:.0%})"
-                    )
+                    if last_dets:
+                        top  = last_dets[0]
+                        info = CLOUD_WEATHER_MAP.get(top["label"], {"icon": "❓", "cuaca": "-"})
+                        info_window.info(
+                            f"{info['icon']} Frame {frame_idx}: "
+                            f"**{top['label']}** — {info['cuaca']} "
+                            f"({top['conf']:.0%})"
+                        )
 
-                frame_idx += 1
+                    frame_idx += 1
 
-            cap.release()
+            container.close()
             os.unlink(tfile.name)
             progress_bar.progress(1.0)
             st.success("✅ Analisis video selesai!")
 
-            # Ringkasan
             if all_dets:
                 from collections import Counter
                 label_counts = Counter(d["label"] for d in all_dets)
