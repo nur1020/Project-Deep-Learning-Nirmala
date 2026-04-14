@@ -14,3 +14,4 @@ torchvision>=0.17.0
 
 # ─── Opsional (untuk performa lebih baik) ────
 # torchaudio  # tidak wajib
+gdown
