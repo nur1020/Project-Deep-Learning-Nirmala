@@ -243,29 +243,58 @@ with tab_cam:
 
     from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
     import av
+    import threading
 
     class CloudDetector(VideoProcessorBase):
         def __init__(self):
             self.conf_threshold = conf_threshold
             self.model_tuple = model_tuple
+            self.last_dets = []
+            self.lock = threading.Lock()
 
         def recv(self, frame):
             img_bgr = frame.to_ndarray(format="bgr24")
-
-            # Deteksi
             dets = predict_image(self.model_tuple, img_bgr, self.conf_threshold)
-
-            # Gambar bounding box
+            with self.lock:
+                self.last_dets = dets
             annotated = draw_results(img_bgr, dets)
-
             return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
-    webrtc_streamer(
+    ctx = webrtc_streamer(
         key="cloud-detector",
         video_processor_factory=CloudDetector,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
     )
+
+    # Tampilkan hasil deteksi di bawah video
+    st.markdown("---")
+    st.markdown("### 🔍 Hasil Deteksi Realtime")
+    result_placeholder = st.empty()
+
+    if ctx.video_processor:
+        while True:
+            with ctx.video_processor.lock:
+                dets = ctx.video_processor.last_dets
+
+            if dets:
+                result_text = ""
+                for det in dets:
+                    label = det["label"]
+                    conf  = det["conf"]
+                    info  = CLOUD_WEATHER_MAP.get(label, {"icon": "❓", "cuaca": "-"})
+                    result_text += f"""
+<div style='background:#1e1e2e;padding:16px;border-radius:12px;
+margin-bottom:10px;border-left:4px solid #00cc88'>
+<h3 style='color:white;margin:0'>{info['icon']} {label}</h3>
+<p style='color:#aaa;margin:4px 0'>☁️ Cuaca: <b style='color:white'>{info['cuaca']}</b></p>
+<p style='color:#aaa;margin:4px 0'>🎯 Kepercayaan: <b style='color:#00cc88'>{conf:.0%}</b></p>
+</div>"""
+                result_placeholder.markdown(result_text, unsafe_allow_html=True)
+            else:
+                result_placeholder.info("⏳ Menunggu deteksi awan... Arahkan kamera ke langit!")
+
+            time.sleep(0.5)
 
 # ══════════════════════════════════════════════
 # TAB 2 – UPLOAD GAMBAR
