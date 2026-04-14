@@ -238,27 +238,34 @@ tab_cam, tab_img, tab_vid = st.tabs(["📷 Kamera Live", "🖼️ Upload Gambar"
 # TAB 1 – KAMERA LIVE
 # ══════════════════════════════════════════════
 with tab_cam:
-    st.markdown("### 📷 Deteksi Langsung via Kamera")
-    st.info("Arahkan kamera HP ke langit, lalu ambil foto.")
+    st.markdown("### 📷 Deteksi Realtime via Kamera")
+    st.info("Arahkan kamera HP ke langit — deteksi berjalan otomatis!")
 
-    img_captured = st.camera_input("📸 Ambil Foto Langit")
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+    import av
 
-    if img_captured is not None:
-        img_pil = Image.open(img_captured).convert("RGB")
-        img_bgr = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    class CloudDetector(VideoProcessorBase):
+        def __init__(self):
+            self.conf_threshold = conf_threshold
+            self.model_tuple = model_tuple
 
-        with st.spinner("🔍 Mendeteksi..."):
-            dets = predict_image(model_tuple, img_bgr, conf_threshold)
+        def recv(self, frame):
+            img_bgr = frame.to_ndarray(format="bgr24")
 
-        annotated = draw_results(img_bgr, dets)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(img_pil, caption="Foto Asli", use_container_width=True)
-        with col2:
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-                     caption="Hasil Deteksi", use_container_width=True)
+            # Deteksi
+            dets = predict_image(self.model_tuple, img_bgr, self.conf_threshold)
 
-        show_detection_cards(dets)
+            # Gambar bounding box
+            annotated = draw_results(img_bgr, dets)
+
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+
+    webrtc_streamer(
+        key="cloud-detector",
+        video_processor_factory=CloudDetector,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
 
 # ══════════════════════════════════════════════
 # TAB 2 – UPLOAD GAMBAR
