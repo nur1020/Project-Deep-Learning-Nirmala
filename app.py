@@ -1,9 +1,10 @@
 import streamlit as st
+import os
+import gdown
 import cv2
 import numpy as np
 from PIL import Image
 import tempfile
-import os
 import time
 from pathlib import Path
 import sys
@@ -20,18 +21,27 @@ st.set_page_config(
 
 # Kelas awan + cuaca yang diprediksi
 CLOUD_WEATHER_MAP = {
-    "Cirrus":       {"cuaca": "Cerah / Berawan Tipis",   "icon": "🌤️",  "warna": "#87CEEB"},
-    "Cirrocumulus": {"cuaca": "Cerah Berawan",            "icon": "🌥️",  "warna": "#B0C4DE"},
-    "Cirrostratus": {"cuaca": "Berawan, mungkin hujan",  "icon": "🌦️",  "warna": "#708090"},
     "Altocumulus":  {"cuaca": "Berawan Sedang",           "icon": "⛅",   "warna": "#6495ED"},
-    "Altostratus":  {"cuaca": "Mendung, hujan ringan",   "icon": "🌧️",  "warna": "#4682B4"},
-    "Stratocumulus":{"cuaca": "Berawan Tebal",            "icon": "🌦️",  "warna": "#5F9EA0"},
-    "Stratus":      {"cuaca": "Berkabut / Gerimis",      "icon": "🌫️",  "warna": "#778899"},
     "Nimbostratus": {"cuaca": "Hujan Lebat",              "icon": "🌧️",  "warna": "#2F4F4F"},
     "Cumulus":      {"cuaca": "Cerah",                    "icon": "⛅",   "warna": "#32CD32"},
     "Cumulonimbus": {"cuaca": "Badai / Hujan Deras",     "icon": "⛈️",   "warna": "#DC143C"},
 }
 
+def download_models():
+    os.makedirs("models", exist_ok=True)
+    
+    files = {
+        "models/Model_FasterRCNN_AWAN_best.pth": "1B7JoXIF5KUOEbRvZqzGkpvStyjGk-RXJ",
+        "models/Model_SSD_AWAN_best.pth":         "1ojMR1qJhhMkSKI_3ELG9vyHay2ERNn5E",
+        "models/Model_YOLO_AWAN_best.pt":         "1MfZyBQzqlsBbbcGlfeG78ItSdH5n5oJU",
+    }
+    
+    for path, file_id in files.items():
+        if not os.path.exists(path):
+            with st.spinner(f"⬇️ Mendownload {path}..."):
+                gdown.download(f"https://drive.google.com/uc?id={file_id}", path, quiet=False)
+
+download_models()
 # ─────────────────────────────────────────────
 # LOAD MODEL (cached)
 # ─────────────────────────────────────────────
@@ -48,7 +58,7 @@ def load_model(model_name):
             import torch
             import torchvision
             from torchvision.models.detection import ssd300_vgg16
-            num_classes = len(CLOUD_WEATHER_MAP) + 1  # +1 background
+            num_classes = 5   # +1 background
             model = ssd300_vgg16(weights=None)
             # Sesuaikan head jika perlu
             checkpoint = torch.load("models/Model_SSD_AWAN_best.pth",
@@ -61,7 +71,7 @@ def load_model(model_name):
         elif model_name == "Faster R-CNN":
             import torch
             from torchvision.models.detection import fasterrcnn_resnet50_fpn
-            num_classes = len(CLOUD_WEATHER_MAP) + 1
+            num_classes = 5 # 4 kelas + background
             model = fasterrcnn_resnet50_fpn(weights=None, num_classes=num_classes)
             checkpoint = torch.load("models/Model_FasterRCNN_AWAN_best.pth",
                                     map_location=torch.device("cpu"))
