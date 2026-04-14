@@ -140,43 +140,20 @@ def predict_image(model_tuple, img_bgr, conf_threshold=0.4):
 
 
 def draw_results(img_bgr, detections):
+    """Gambar bounding box + label ke gambar."""
     img = img_bgr.copy()
-    h, w = img.shape[:2]
-
     for det in detections:
         label = det["label"]
         conf  = det["conf"]
         x1, y1, x2, y2 = det["box"]
         info  = CLOUD_WEATHER_MAP.get(label, {"cuaca": "Unknown", "icon": "❓"})
-        cuaca = info["cuaca"]
         color = (0, 200, 100)
-
-        # Bounding box
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-
-        # Label nama awan + confidence
-        text1 = f"{label} {conf:.0%}"
-        (tw, th), _ = cv2.getTextSize(text1, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        text = f"{label} {conf:.0%}"
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         cv2.rectangle(img, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(img, text1, (x1 + 2, y1 - 4),
+        cv2.putText(img, text, (x1 + 2, y1 - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-        # Label cuaca di bawah bounding box
-        text2 = f"Cuaca: {cuaca}"
-        (tw2, th2), _ = cv2.getTextSize(text2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        cv2.rectangle(img, (x1, y2), (x1 + tw2 + 4, y2 + th2 + 8), (30, 30, 30), -1)
-        cv2.putText(img, text2, (x1 + 2, y2 + th2 + 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
-
-    # Info cuaca utama di pojok kiri atas
-    if detections:
-        top   = detections[0]
-        info  = CLOUD_WEATHER_MAP.get(top["label"], {"cuaca": "-"})
-        cuaca_text = f"Cuaca: {info['cuaca']}"
-        cv2.rectangle(img, (0, 0), (w, 36), (0, 0, 0), -1)
-        cv2.putText(img, cuaca_text, (10, 26),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
     return img
 
 
