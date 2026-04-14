@@ -1,10 +1,20 @@
+# ─── Core ───────────────────────────────────
 streamlit>=1.35.0
 opencv-python-headless>=4.9.0
 Pillow>=10.0.0
 numpy>=1.24.0
+
+# ─── YOLO ───────────────────────────────────
 ultralytics>=8.2.0
+
+# ─── PyTorch (CPU) ──────────────────────────
+# Jika pakai GPU, ganti dengan versi CUDA yang sesuai
 torch>=2.2.0
 torchvision>=0.17.0
+
+# ─── Opsional (untuk performa lebih baik) ────
+# torchaudio  # tidak wajib
+gdown
 gdown
 streamlit-webrtc
 av
