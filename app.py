@@ -338,8 +338,8 @@ with st.sidebar:
     st.divider()
     model_choice = st.selectbox(
         "Model Deteksi",
-        ["YOLO", "SSD", "Faster R-CNN"],
-        index=["YOLO", "SSD", "Faster R-CNN"].index(
+        ["YOLO", "Faster R-CNN"],
+        index=["YOLO", "Faster R-CNN"].index(
             st.session_state.last_model
         )
     )
